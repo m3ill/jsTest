@@ -1,7 +1,10 @@
 {
-    "type": "module",
-    "dependencies": {
-        "express": "^5.3.0",
-        "pg": "^8.23.1"
-    }
+  "type": "module",
+  "scripts": {
+    "test": "node --test server_test.js"
+  },
+  "dependencies": {
+    "express": "^5.3.0",
+    "pg": "^8.23.1"
+  }
 }

@@ -1,6 +1,6 @@
 import express from "express";
 import pg from 'pg';
-import { error } from "node:console";
+
 
 const app = express();
 app.use(express.json());
@@ -14,27 +14,10 @@ const pool = new Pool({
     database : "task_app"
 });
 
-const tasks = [{id : 1, title : "backend",completed : false}];
-let nextId = 2;
+async function findTaskInDatabase(id){
+   const result = await pool.query("SELECT * FROM tasks WHERE id = $1",[id]);
 
-function findTaskInDatabase(id){
-    return new Promise((resolve, reject) => {
-        setTimeout(() => {
-
-            if(id === -1){
-                reject(new Error("Geçersiz görev id"));
-                return;
-            }
-
-            try{
-                const result = new pool("SELECT * FROM tasks where id = ($1);",[id]);
-            }catch(error){
-                console.error("veritabanı hatası : ",error);
-            }
-
-            resolve(result);
-        }, 1000);
-    });
+   return result.rows[0];
 }
 async function getHandleTask(id){
 
@@ -65,21 +48,23 @@ app.get("/tasks/:id", async (req, res) => {
     res.status(result.status).json(result.body);
 });
 
-app.post("/tasks", (req, res) => {
+app.post("/tasks", async (req, res) => {
 
     const title = req.body?.title;
 
-    if(title.trim() === "" || typeof title !== "string"){
+    if( typeof title !== "string" || title.trim() === ""){
         return res.status(400).json({error: "Geçersiz görev başlığı"});
     }
 
-    const task = {
-        id: nextId++,
-        title: title,
-        completed: false
+    try{
+        const result = await pool.query('INSERT INTO tasks (title, completed) VALUES($1,$2) RETURNING *;',[title.trim(),false]);
+        return res.status(201).json(result.rows[0]);
+    }catch(error){
+        console.error("görev bulunamadı",error);
+        return res.status(500).json({
+            error:"Görev eklenemedi"
+        });
     }
-    tasks.push(task);
-    return res.status(201).json(task);
 });
 
 
@@ -90,20 +75,17 @@ app.get("/health", (req, res) => {
 app.get("/tasks",async (req,res) => {
     try{
         const result = await pool.query("SELECT * FROM tasks ORDER BY id;");
-        res.json(result.rows);
+
+        return res.status(200).json(result.rows);
     }catch(error){
         console.error(error);
         res.status(500).json({
             error : "database bağlanılamadı"
         });
-    }finally{
-        pool.end();
     }
-
-    return res.status(200).json(tasks);
 });
 
-app.patch("/tasks/:id",(req,res) => {
+app.patch("/tasks/:id",async (req,res) => {
     const id = Number(req.params.id);
 
     if(!Number.isInteger(id) || id <= 0){
@@ -121,20 +103,25 @@ app.patch("/tasks/:id",(req,res) => {
         })
     }
 
-    const task = tasks.find((task) => task.id === id);
+    try{
+        const result = await pool.query('UPDATE tasks SET completed = $1 WHERE id = $2 RETURNING *;',[comp,id]);
+        const task = result.rows[0];
 
-    if(!task){
-
-        return res.status(404).json({
-            error: "görev bulunamadı"
+        if(!task){
+            return res.status(404).json({
+                error:"görev bulunamadı"
+            });
+        }
+        return res.status(200).json(task);
+    }catch(error){
+        console.error(error);
+        return res.status(500).json({
+            error:"Görev güncellenemdi"
         });
     }
-
-    task.completed = comp;
-    return res.status(200).json(task);
 });
 
-app.delete("/tasks/:id", (req,res) => {
+app.delete("/tasks/:id", async (req,res) => {
     const id = Number(req.params.id);
 
     if(!Number.isInteger(id) || id <= 0){
@@ -143,19 +130,21 @@ app.delete("/tasks/:id", (req,res) => {
         })
     }
 
-    const index = tasks.find((task) => task.id ===id);
+    try{
+        const result = await pool.query('DELETE FROM tasks WHERE id = $1 RETURNING id', [id]);
+        if(result.rows.length === 0){
+            return res.status(404).json({
+                error: "Görev bulunamadı"
+            });
+        }
+        return res.status(204).send();
 
-
-    if (index === -1){
-        return res.status(404).json({
-            error: "görev bulunamadı"
-        })
+    }catch(error){
+        console.error("görev silinemedi :" ,error);
+        return res.status(500).json({
+            error:"görev silinemedi"
+        });
     }
-
-    tasks.splice(index,1);
-    return res.status(204).json();
-
-
 });
 
 app.listen(3000, () => {
